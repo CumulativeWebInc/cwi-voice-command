@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>CWI Voice Command — mixer prototype</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --txt:#e6edf3; --dim:#8b949e;
+          --green:#3fb950; --red:#f85149; --amber:#d29922; --cyan:#39c5cf; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,system-ui,sans-serif; }
+  header { padding:14px 16px 6px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h1 .crown { color:var(--amber); }
+  .sub { color:var(--dim); font-size:13px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; margin:10px 12px; padding:12px; }
+  .panel h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 8px; }
+  .labels { font-size:12.5px; line-height:1.7; }
+  .labels b { color:var(--cyan); }
+  .adapters { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .adapters label { font-size:12px; color:var(--dim); display:block; margin-bottom:3px; }
+  .adapters select { width:100%; padding:9px; border-radius:8px; background:#0d1117; color:var(--txt); border:1px solid var(--line); font-size:14px; }
+  #micWrap { text-align:center; padding:8px 0 2px; }
+  #mic { width:110px; height:110px; border-radius:50%; border:3px solid var(--cyan); background:#0d1b1e;
+         color:var(--cyan); font-size:44px; cursor:pointer; }
+  #mic.listening { background:var(--cyan); color:#062a2d; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 18px rgba(57,197,207,.15); } }
+  #interim { min-height:22px; text-align:center; color:var(--dim); font-style:italic; font-size:14px; margin-top:6px; }
+  #mockBox { display:none; text-align:center; margin-top:8px; }
+  #mockBox input { width:70%; padding:10px; border-radius:8px; border:1px solid var(--line); background:#0d1117; color:var(--txt); font-size:15px; }
+  #mockBox button { padding:10px 14px; border-radius:8px; border:1px solid var(--cyan); background:#0d1b1e; color:var(--cyan); font-size:15px; }
+  #stage { position:relative; width:min(92vw,360px); height:min(92vw,360px); margin:6px auto; }
+  .node { position:absolute; width:64px; height:64px; margin:-32px 0 0 -32px; border-radius:50%;
+          background:#21262d; border:2px solid var(--line); display:flex; flex-direction:column;
+          align-items:center; justify-content:center; font-size:10px; color:var(--dim); cursor:pointer; }
+  .node .nm { font-size:10px; font-weight:700; color:var(--txt); }
+  .node .st { font-size:9px; }
+  .node.solo { border-color:var(--green); box-shadow:0 0 14px rgba(63,185,80,.6); }
+  .node.solo .st { color:var(--green); }
+  .node.muted { opacity:.45; border-color:var(--red); }
+  .node.muted .st { color:var(--red); }
+  .node.sel { outline:2px solid var(--cyan); }
+  #transport { text-align:center; font-size:13px; color:var(--dim); margin-top:2px; }
+  #transport b { color:var(--green); }
+  .sliders { display:grid; gap:6px; margin-top:8px; }
+  .sliders .row { display:grid; grid-template-columns:70px 1fr 44px; align-items:center; gap:8px; font-size:13px; }
+  .sliders input[type=range] { width:100%; }
+  #confirmBar { display:none; text-align:center; padding:12px; }
+  #confirmBar.show { display:block; }
+  #confirmBar p { margin:0 0 10px; font-size:16px; }
+  #confirmBar button { font-size:18px; padding:12px 34px; border-radius:10px; border:none; margin:0 8px; cursor:pointer; }
+  #yesBtn { background:var(--green); color:#04120a; font-weight:700; }
+  #noBtn { background:#3a2b2b; color:var(--red); border:1px solid var(--red); }
+  #lane { display:none; font-size:14px; }
+  #lane.show { display:block; }
+  #lane .q { font-size:16px; margin:4px 0 2px; }
+  #lane .tag { font-size:11px; color:var(--amber); }
+  #log { max-height:300px; overflow-y:auto; font-size:12.5px; }
+  .entry { border-top:1px solid var(--line); padding:8px 0; }
+  .entry .tr { font-size:15px; }
+  .entry pre { background:#0d1117; border-radius:6px; padding:6px; overflow-x:auto; font-size:11px; margin:6px 0; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; }
+  .b-act { background:#12341c; color:var(--green); } .b-confirm { background:#3a2f10; color:var(--amber); }
+  .b-escalate { background:#3a1d1d; color:var(--red); } .b-discard { background:#21262d; color:var(--dim); }
+  .conf { height:6px; background:#21262d; border-radius:3px; margin:6px 0; }
+  .conf i { display:block; height:100%; border-radius:3px; background:var(--cyan); }
+  #latency { font-size:13px; color:var(--dim); text-align:center; }
+  #latency b { color:var(--cyan); font-size:18px; }
+  footer { text-align:center; color:var(--dim); font-size:11px; padding:14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="crown">👑</span> CWI Voice Command <span style="font-size:12px;color:var(--dim)">v1 prototype</span></h1>
+  <div class="sub">Speak mixer commands — the page decides locally and drives the mixer.</div>
+</header>
+
+<div class="panel">
+  <h2>Honest labels</h2>
+  <div class="labels" id="honestLabels">
+    <div>🧠 Decision layer: <b id="lblDecision">local-classifier-v1</b> ($0, on-device, deterministic)</div>
+    <div>🎙️ STT: <b id="lblSTT">browser Web Speech API</b> (the browser vendor's speech service)</div>
+    <div>🔇 TypeSafe Jev: <b>NOT integrated — waitlist-only</b> (slot wired, dormant)</div>
+    <div>📞 Telephony: <b>local demo, not PSTN/telephony</b> (downstream path: cwi-voice-bridge)</div>
+    <div>💬 Escalation lane v1: <b>template-based clarification (not an LLM)</b>, spoken via browser TTS</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Adapters <span style="text-transform:none;letter-spacing:0">(hot-swap, no reload)</span></h2>
+  <div class="adapters">
+    <div><label>Decision</label><select id="selDecision">
+      <option value="local">Local $0</option>
+      <option value="jev" disabled>Jev — dormant (waitlist)</option>
+    </select></div>
+    <div><label>STT</label><select id="selSTT">
+      <option value="web-speech">Web Speech</option>
+      <option value="mock">Mock</option>
+      <option value="whisper" disabled>Whisper — unimplemented</option>
+    </select></div>
+    <div><label>TTS</label><select id="selTTS">
+      <option value="browser">Browser</option>
+      <option value="off">Off</option>
+      <option value="pipecat-voice" disabled>Pipecat voice — unimplemented</option>
+    </select></div>
+    <div><label>Escalation</label><select id="selEsc">
+      <option value="local-template">Local template</option>
+      <option value="api" disabled>LLM API — unconfigured</option>
+    </select></div>
+  </div>
+</div>
+
+<div id="micWrap">
+  <button id="mic" aria-label="Tap to speak">🎙️</button>
+  <div id="interim"></div>
+  <div id="mockBox">
+    <input id="mockInput" placeholder='Type a command, e.g. "mute singer"'>
+    <button id="mockSend">Send</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Mixer <span id="latency" style="text-transform:none">latency: <b>—</b> ms</span></h2>
+  <div id="stage"></div>
+  <div id="transport">transport: <b id="transportState">stopped</b></div>
+  <div class="sliders" id="sliders" style="display:none">
+    <div class="row"><span>reverb</span><input type="range" id="slRev" min="0" max="100" value="0"><b id="vRev">0</b></div>
+    <div class="row"><span>pan L/R</span><input type="range" id="slPan" min="-100" max="100" value="0"><b id="vPan">0</b></div>
+    <div class="row"><span>volume</span><input type="range" id="slVol" min="0" max="100" value="80"><b id="vVol">80</b></div>
+  </div>
+</div>
+
+<div class="panel" id="confirmBar">
+  <h2>Confirm</h2>
+  <p id="confirmText"></p>
+  <button id="yesBtn">Yes</button><button id="noBtn">No</button>
+</div>
+
+<div class="panel" id="lane">
+  <h2>Discussion lane <span class="tag">(stub in v1 — clarifies only, no generation)</span></h2>
+  <div class="q" id="laneQ"></div>
+  <div class="sub">Say it again — the next utterance resolves in context.</div>
+</div>
+
+<div class="panel">
+  <h2>Command log</h2>
+  <div id="log"></div>
+</div>
+
+<footer>cwi-voice-command v1 · zero dependencies · <span id="footLayer">local-classifier-v1</span></footer>
+
+<script type="module">
+import { createConfig } from './src/config.js';
+import { createMixer } from './src/mixer.js';
+import { createHandover } from './src/handover.js';
+
+const TRACKS = ['vocals','drums','guitar','bass','keys','synth','horns','percussion','master'];
+const cfg = createConfig();
+const mixer = createMixer();
+let handover = createHandover({ escalation: cfg.getEscalation(), tts: cfg.getTTS() });
+let stt = cfg.getSTT();
+const ctx = { lastTarget: null, lastPanSign: -1 }; // anaphora context
+let selected = 'vocals';
+
+// ---- mixer nodes ----
+const stage = document.getElementById('stage');
+const nodes = {};
+TRACKS.forEach((t, i) => {
+  const a = (i / TRACKS.length) * Math.PI * 2 - Math.PI / 2;
+  const el = document.createElement('div');
+  el.className = 'node';
+  el.style.left = (50 + 42 * Math.cos(a)) + '%';
+  el.style.top = (50 + 42 * Math.sin(a)) + '%';
+  el.innerHTML = `<div class="nm">${t}</div><div class="st">—</div>`;
+  el.onclick = () => { selected = t; paint(); };
+  stage.appendChild(el);
+  nodes[t] = el;
+});
+
+function paint() {
+  for (const t of TRACKS) {
+    const s = mixer.getTrack(t), el = nodes[t];
+    el.classList.toggle('solo', s.solo);
+    el.classList.toggle('muted', s.mute && !s.solo);
+    el.classList.toggle('sel', t === selected);
+    el.querySelector('.st').textContent = s.solo ? 'SOLO' : s.mute ? 'MUTED' : '—';
+  }
+  document.getElementById('transportState').textContent = mixer.transport;
+  const s = mixer.getTrack(selected);
+  document.getElementById('sliders').style.display = 'grid';
+  slRev.value = s.reverb; vRev.textContent = s.reverb;
+  slPan.value = s.pan; vPan.textContent = s.pan;
+  slVol.value = s.volume; vVol.textContent = s.volume;
+}
+
+// ---- log ----
+const logEl = document.getElementById('log');
+function log(transcript, decisions, route) {
+  const div = document.createElement('div');
+  div.className = 'entry';
+  const badge = { act:'b-act', confirm:'b-confirm', escalate:'b-escalate', discard:'b-discard' }[route];
+  div.innerHTML = `<div class="tr">"${transcript}" <span class="badge ${badge}">${route}</span></div>` +
+    decisions.map(d => {
+      const pct = Math.round(d.confidence * 100);
+      return `<pre>${JSON.stringify({action:d.action,target:d.target,value:d.value,confidence:d.confidence,destructive:d.destructive,layer:d.layer}, null, 1)}</pre><div class="conf"><i style="width:${pct}%"></i></div>`;
+    }).join('');
+  logEl.prepend(div);
+  while (logEl.children.length > 30) logEl.lastChild.remove();
+}
+
+// ---- the pipeline: final transcript -> decision -> handover -> mixer ----
+function pipeline(transcript) {
+  const t0 = performance.now();
+  const adapter = cfg.getDecisionAdapter();
+  const batch = adapter.decideBatch ? adapter.decideBatch(transcript, ctx) : [adapter.decide(transcript, ctx)];
+  const route = batch.length === 1 ? handover.route(batch[0]) : handover.routeBatch(batch);
+
+  if (route === 'act') {
+    const recs = mixer.applyAll(batch);
+    for (const d of batch) {
+      if (d.target) ctx.lastTarget = d.target;
+      if (d.action === 'set_pan' && typeof d.value === 'number' && d.value !== 0) ctx.lastPanSign = Math.sign(d.value);
+    }
+    hideConfirm(); hideLane();
+    log(transcript, batch, 'act');
+  } else if (route === 'confirm') {
+    showConfirm(batch);
+    log(transcript, batch, 'confirm');
+  } else {
+    const c = handover.getClarification();
+    showLane(c);
+    log(transcript, batch, 'escalate');
+  }
+  paint();
+  const ms = performance.now() - t0;
+  document.querySelector('#latency b').textContent = ms.toFixed(1);
+  document.getElementById('interim').textContent = '';
+}
+
+// ---- confirm flow: real Yes/No buttons ----
+let pendingBatch = null;
+function showConfirm(batch) {
+  pendingBatch = batch;
+  const d = batch[0];
+  document.getElementById('confirmText').textContent =
+    batch.length > 1 ? `Run ${batch.length} commands? (${batch.map(x => x.action + ' ' + (x.target || '')).join(' · ')})`
+    : `Did you mean: ${d.action}${d.target ? ' ' + d.target : ''}${d.value !== null && d.value !== undefined ? ' ' + d.value + '%' : ''}?`;
+  document.getElementById('confirmBar').classList.add('show');
+}
+function hideConfirm() { document.getElementById('confirmBar').classList.remove('show'); pendingBatch = null; }
+document.getElementById('yesBtn').onclick = () => {
+  const r = handover.resolveYesNo(true);
+  if (r.route === 'act') {
+    mixer.applyAll(r.decisions);
+    for (const d of r.decisions) { if (d.target) ctx.lastTarget = d.target; }
+    log('— confirmed —', r.decisions, 'act');
+  }
+  hideConfirm(); paint();
+};
+document.getElementById('noBtn').onclick = () => {
+  handover.resolveYesNo(false);
+  log('— discarded —', pendingBatch || [], 'discard');
+  hideConfirm(); paint();
+};
+
+function showLane(c) {
+  document.getElementById('laneQ').textContent = c && c.question ? c.question : "Didn't catch that — say it again?";
+  document.getElementById('lane').classList.add('show');
+}
+function hideLane() { document.getElementById('lane').classList.remove('show'); }
+
+// ---- mic / STT ----
+const mic = document.getElementById('mic');
+const interimEl = document.getElementById('interim');
+let listening = false;
+mic.onclick = () => {
+  if (listening) { stt.stop(); setListening(false); return; }
+  hideConfirm(); hideLane();
+  const r = stt.start(
+    (final) => { setListening(false); if (final && final.trim()) pipeline(final.trim()); },
+    (inter) => { interimEl.textContent = inter; },
+    (err) => { setListening(false); interimEl.textContent = 'mic error: ' + (err && (err.error || err.message) || 'unknown'); }
+  );
+  if (r && r.ok === false) { interimEl.textContent = 'STT unavailable: ' + (r.reason || r.error); return; }
+  setListening(true);
+};
+function setListening(v) { listening = v; mic.classList.toggle('listening', v); if (!v) stt.stop(); }
+
+// mock STT: type a transcript instead of speaking
+document.getElementById('mockSend').onclick = () => {
+  const t = document.getElementById('mockInput').value.trim();
+  if (!t) return;
+  if (stt.name === 'mock' && stt.queueTranscript) stt.queueTranscript(t);
+  pipeline(t);
+  document.getElementById('mockInput').value = '';
+};
+
+// ---- adapter pickers (hot-swap, no reload) ----
+function refreshLabels() {
+  const s = cfg.snapshot();
+  lblDecision.textContent = s.decision === 'local' ? 'local-classifier-v1' : s.decision;
+  lblSTT.textContent = s.stt === 'web-speech' ? 'browser Web Speech API' : s.stt;
+  footLayer.textContent = s.decision === 'local' ? 'local-classifier-v1' : s.decision;
+  document.getElementById('mockBox').style.display = s.stt === 'mock' ? 'block' : 'none';
+}
+selDecision.onchange = (e) => { cfg.setBackend('decision', e.target.value); handover = createHandover({ escalation: cfg.getEscalation(), tts: cfg.getTTS() }); refreshLabels(); };
+selSTT.onchange = (e) => { cfg.setBackend('stt', e.target.value); stt = cfg.getSTT(); refreshLabels(); };
+selTTS.onchange = (e) => { cfg.setBackend('tts', e.target.value); handover = createHandover({ escalation: cfg.getEscalation(), tts: cfg.getTTS() }); refreshLabels(); };
+selEsc.onchange = (e) => { cfg.setBackend('escalation', e.target.value); handover = createHandover({ escalation: cfg.getEscalation(), tts: cfg.getTTS() }); refreshLabels(); };
+
+// ---- manual sliders (direct mixer control, same apply path) ----
+function manual(action, value) {
+  mixer.apply({ action, target: selected, value, confidence: 0.99, destructive: false, source_text: '[slider]', layer: 'ui-manual' });
+  paint();
+}
+slRev.oninput = () => manual('set_reverb', +slRev.value);
+slPan.oninput = () => manual('set_pan', +slPan.value);
+slVol.oninput = () => manual('set_volume', +slVol.value);
+
+paint();
+refreshLabels();
+
+// Test hook: exposes the real pipeline for automated latency measurement
+// (headless Chromium drives window.CWI.pipeline(transcript) and reads the
+// same latency readout the UI shows). Not a simulation — same code path.
+window.CWI = { pipeline, cfg, mixer, handover: () => handover, ctx };
+</script>
+</body>
+</html>
